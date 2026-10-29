@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0B0420">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="description" content="Dance Next Now: dance as coreografias do Just Dance Next direto no navegador.">
+  <title>Dance Next Now</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23FF3CAC'/%3E%3Cpath d='M20 14h12c11 0 18 7 18 18s-7 18-18 18H20z' fill='%23fff'/%3E%3Cpath d='M28 22v20h4c6 0 10-4 10-10s-4-10-10-10z' fill='%23FF3CAC'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rubik:ital,wght@0,400;0,600;0,800;1,800;1,900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="bg" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+
+  <!-- ============ TÍTULO ============ -->
+  <section id="title" class="screen" hidden>
+    <button class="btn ghost corner" data-action="settings">Ajustes</button>
+    <div class="logo">
+      <b>DANCE</b>
+      <i>NEXT NOW</i>
+    </div>
+    <button id="startBtn" class="btn pink big pulse" disabled>CARREGANDO...</button>
+    <p id="titleStatus" class="dim">Carregando músicas...</p>
+    <p class="legal">Projeto de fã, sem fins lucrativos. Just Dance é marca da Ubisoft; vídeos e músicas vêm dos servidores originais.</p>
+  </section>
+
+  <!-- ============ ESCOLHA DE MÚSICA ============ -->
+  <section id="select" class="screen" hidden>
+    <header class="topbar">
+      <button class="btn ghost square" data-action="back" aria-label="Voltar">&lsaquo;</button>
+      <h1 class="heading">ESCOLHA SUA MÚSICA</h1>
+      <input id="search" type="search" placeholder="Buscar música ou artista..." autocomplete="off" spellcheck="false">
+      <button class="btn ghost" data-action="settings">Ajustes</button>
+    </header>
+    <nav id="chips" class="chips"></nav>
+    <div class="select-body">
+      <div id="grid" class="grid" role="listbox" aria-label="Músicas"></div>
+      <aside id="detail" class="detail panel">
+        <div class="preview">
+          <video id="previewVideo" muted playsinline loop preload="none"></video>
+          <span id="previewHint" class="preview-hint">Escolha uma música</span>
+        </div>
+        <div class="info">
+          <div class="info-bar" id="dColor"></div>
+          <h2 id="dTitle">—</h2>
+          <p id="dArtist" class="dim"></p>
+          <p id="dBadges" class="badges"></p>
+          <p id="dBest" class="best"></p>
+        </div>
+        <div class="actions">
+          <button id="playBtn" class="btn pink big">DANÇAR!</button>
+          <button id="previewBtn" class="btn purple">Prévia 30s</button>
+          <button id="coachBtn" class="btn ghost" hidden>Coach 1</button>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ============ JOGO ============ -->
+  <section id="game" class="screen" hidden>
+    <video id="gameVideo" muted playsinline preload="auto"></video>
+    <div id="tapZone" class="tapzone"></div>
+    <div id="goldVignette" class="gold-vignette"></div>
+
+    <div class="hud">
+      <div class="scorebox">
+        <div class="score-top"><span id="hudName"></span><span id="hudScore">0</span></div>
+        <div class="bar"><div id="hudBar"></div></div>
+        <div class="score-bottom"><span id="hudStars" class="stars"></span><span id="hudStarLabel"></span></div>
+      </div>
+      <div id="hudSong" class="hud-song"></div>
+      <button id="pauseBtn" class="btn ghost square pause" aria-label="Pausar">II</button>
+
+      <div id="goldLabel" class="gold-label" hidden>GOLD MOVE</div>
+      <div id="feedback" class="feedback"></div>
+      <div id="combo" class="combo"></div>
+      <div id="hint" class="hint"></div>
+
+      <div class="pulsebox"><div id="pulse" class="pulse-dot"></div></div>
+      <div class="energy"><div id="energy"></div></div>
+
+      <div id="lane" class="lane" hidden><div class="lane-target" id="laneTarget"></div></div>
+      <div id="lyrics" class="lyrics" hidden><div id="lyricLine" class="lyric-line"></div><div id="lyricNext" class="lyric-next"></div></div>
+
+      <div class="progress"><div id="progress"></div></div>
+    </div>
+
+    <div id="overlay" class="overlay" hidden>
+      <div class="overlay-box">
+        <h2 id="ovTitle"></h2>
+        <p id="ovMsg"></p>
+        <div id="ovButtons" class="ov-buttons"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RESULTADO ============ -->
+  <section id="results" class="screen" hidden>
+    <div class="panel results-card">
+      <h2 id="rTitle"></h2>
+      <p id="rArtist" class="dim"></p>
+      <div id="rScore" class="r-score">0</div>
+      <div id="rStars" class="stars big"></div>
+      <div id="rStarLabel" class="r-label"></div>
+      <div id="rRecord" class="r-record"></div>
+      <div id="rCounts" class="r-counts"></div>
+      <p id="rExtra" class="dim small"></p>
+      <div class="r-actions">
+        <button id="againBtn" class="btn pink big">DANÇAR DE NOVO</button>
+        <button id="otherBtn" class="btn purple big">OUTRA MÚSICA</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ AJUSTES ============ -->
+  <div id="settings" class="modal" hidden>
+    <div class="panel modal-box" role="dialog" aria-labelledby="setTitle">
+      <h2 id="setTitle" class="heading">AJUSTES</h2>
+      <label class="row"><span>Seu nome</span><input id="setName" maxlength="16"></label>
+      <div class="row"><span>Controle</span><button id="setControl" class="btn ghost"></button></div>
+      <div class="row"><span>Qualidade do vídeo</span><button id="setQuality" class="btn ghost"></button></div>
+      <div class="row"><span>Sincronia das batidas</span><div class="stepper" data-key="offsetMs" data-step="10"><button>-</button><output></output><button>+</button></div></div>
+      <div class="row"><span>Atraso do vídeo</span><div class="stepper" data-key="videoOffsetMs" data-step="20"><button>-</button><output></output><button>+</button></div></div>
+      <div class="row"><span>Volume</span><div class="stepper" data-key="volume" data-step="0.1"><button>-</button><output></output><button>+</button></div></div>
+      <div class="row"><span>Mostrar câmera</span><button id="setCamPreview" class="btn ghost"></button></div>
+      <div class="modal-actions">
+        <button id="fullscreenBtn" class="btn purple">Tela cheia</button>
+        <button id="closeSettings" class="btn pink">PRONTO</button>
+      </div>
+    </div>
+  </div>
+
+  <audio id="previewAudio" loop preload="none"></audio>
+  <audio id="gameAudio" preload="auto"></audio>
+  <video id="camVideo" class="cam-preview" muted playsinline hidden></video>
+
+  <noscript>Ative o JavaScript para dançar.</noscript>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

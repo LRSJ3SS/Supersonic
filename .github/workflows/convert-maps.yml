@@ -1,0 +1,64 @@
+name: Converter mapas (mapPackage)
+
+# Roda o Tools/jdnext_map_converter.py na nuvem: baixa o mapPackage pelo nohud,
+# gera data/maps/<Codename>/map.json + pictos.png e faz commit no main.
+# A Vercel (ligada ao repositório) publica sozinha em ~1 minuto.
+on:
+  workflow_dispatch:
+    inputs:
+      codenames:
+        description: "Codenames separados por espaço (ex.: ChefKids Starships)"
+        required: true
+      moves:
+        description: "Exportar também os classificadores .msm"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: convert-maps
+  cancel-in-progress: false
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CODENAMES: ${{ inputs.codenames }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar UnityPy
+        run: pip install UnityPy Pillow
+
+      - name: Converter
+        id: conv
+        run: |
+          if ! [[ "$CODENAMES" =~ ^[A-Za-z0-9_\ -]+$ ]]; then
+            echo "Codenames inválidos: use só letras, números, _ e -"; exit 1
+          fi
+          set +e
+          python Tools/jdnext_map_converter.py $CODENAMES ${{ inputs.moves && '--moves' || '' }}
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Salvar no main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/maps
+          if git diff --cached --quiet; then echo "Nada novo para salvar"; exit 0; fi
+          git commit -m "mapas: $CODENAMES"
+          git push
+
+      - name: Resultado
+        run: |
+          if [ "${{ steps.conv.outputs.code }}" != "0" ]; then
+            echo "::warning::Algum mapa falhou. Veja o passo 'Converter' (rode localmente com --dump para depurar)."
+            exit 1
+          fi
