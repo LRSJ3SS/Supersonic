@@ -31,11 +31,6 @@ export class SelectScreen {
     });
     $('#playBtn').addEventListener('click', () => this.play(false));
     $('#previewBtn').addEventListener('click', () => this.play(true));
-    $('#coachBtn').addEventListener('click', () => {
-      const s = this.current; if (!s) return;
-      this.coach = (this.coach + 1) % Math.max(1, s.coaches);
-      $('#coachBtn').textContent = `Coach ${this.coach + 1}`;
-    });
     this.video.addEventListener('playing', () => { this.hint.textContent = ''; });
     this.video.addEventListener('error', () => { if (this.previewSong) this.hint.textContent = 'Prévia indisponível'; });
   }
@@ -97,7 +92,6 @@ export class SelectScreen {
     const card = this.grid.children[i];
     card?.classList.add('sel');
     if (scroll) card?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    if (changed) this.coach = 0;
     this.updateDetail();
   }
 
@@ -114,12 +108,10 @@ export class SelectScreen {
     $('#dArtist').textContent = s.artist;
     $('#dBadges').textContent = [full ? 'COREOGRAFIA COMPLETA' : null, s.versionLabel, s.coachLabel,
       `Dificuldade ${s.diff}/4`, `Esforço ${s.sweat}/3`, fmtTime(s.len)].filter(Boolean).join('  ·  ');
-    const best = Settings.bestScore(s.id);
-    $('#dBest').textContent = best ? `Recorde: ${best} (${starLabel(best)})` : 'Ainda sem recorde';
+    const best = Settings.bestForSong(s.id);
+    $('#dBest').textContent = best.score ? `Recorde: ${best.score} · ${best.name} (${starLabel(best.score)})` : 'Ainda sem recorde';
     $('#dColor').style.background = songColor(s);
-    const coachBtn = $('#coachBtn');
-    coachBtn.hidden = !(full && s.coaches > 1);
-    coachBtn.textContent = `Coach ${this.coach + 1}`;
+    this.updatePlayers();
 
     if (s !== this.previewSong) {
       this.stopPreview();
@@ -151,11 +143,28 @@ export class SelectScreen {
     if (Math.abs(drift) > 0.3 && this.audio.currentTime > 0.2) this.video.currentTime = this.audio.currentTime;
   }
 
+  /** Mostra quem vai dançar e com qual coach. */
+  updatePlayers() {
+    const s = this.current;
+    const players = this.app.room?.connected || [];
+    const box = $('#dPlayers');
+    if (!players.length) {
+      box.textContent = 'Nenhum celular conectado — clique em SALA para convidar';
+      box.classList.add('warn');
+      return;
+    }
+    box.classList.remove('warn');
+    const coaches = s && MapLibrary.has(s.map) ? Math.max(1, s.coaches) : 1;
+    box.replaceChildren(...players.map((p, i) => el('span', { class: 'pchip', style: `--pc:${p.color}` },
+      p.name + (coaches > 1 ? ` · coach ${(i % coaches) + 1}` : ''))));
+  }
+
   play(previewOnly) {
     const s = this.current;
     if (!s) return;
+    if (!this.app.room?.connected.length) { this.app.toast('Conecte pelo menos um celular na sala para dançar'); this.app.invite.open(); return; }
     this.stopPreview();
-    this.app.startGame(s, previewOnly, this.coach);
+    this.app.startGame(s, previewOnly);
   }
 
   columns() {
@@ -163,12 +172,15 @@ export class SelectScreen {
     return Math.max(1, cols);
   }
 
-  onKey(e) {
-    if (document.activeElement === this.search) return false;
+  /** Teclado do PC (fromPhone=false) ou controle remoto do celular. */
+  onKey(key, fromPhone = false) {
+    if (!fromPhone && document.activeElement === this.search) return false;
+    const map = { left: 'ArrowLeft', right: 'ArrowRight', up: 'ArrowUp', down: 'ArrowDown', ok: 'Enter', back: 'Escape' };
+    key = map[key] || key;
     const moves = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: this.columns(), ArrowUp: -this.columns() };
-    if (e.key in moves) { this.select(this.index + moves[e.key], true); return true; }
-    if (e.key === 'Enter') { this.play(false); return true; }
-    if (e.key === '/') { this.search.focus(); return true; }
+    if (key in moves) { this.select(this.index + moves[key], true); return true; }
+    if (key === 'Enter') { this.play(false); return true; }
+    if (key === '/') { this.search.focus(); return true; }
     return false;
   }
 }

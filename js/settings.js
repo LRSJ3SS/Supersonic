@@ -1,36 +1,31 @@
 import { isMobile, clamp } from './util.js';
 
-// Ajustes e recordes ficam no navegador (localStorage), com proteção para
-// modo anônimo/armazenamento bloqueado.
-const KEY = 'dnn.settings.v1';
-const BEST = 'dnn.best.v1';
+// Ajustes da TELA e recordes (localStorage), com proteção para modo anônimo.
+const KEY = 'dnn.screen.v2';
+const BEST = 'dnn.best.v2';
 const defaults = {
-  name: 'Dançarino',
-  control: isMobile ? 'motion' : 'camera', // motion | camera | tap
   quality: isMobile ? 'MID' : 'HIGH',
+  axes: 'raw',          // raw = acelerômetro do celular direto (JD Next) | jdnow = rotação 30° do app JD Now
   offsetMs: 0,
   videoOffsetMs: 0,
   volume: 1,
-  cameraPreview: true,
 };
 
 function read(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
 }
 function write(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* sem armazenamento: fica só na memória */ }
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* sem armazenamento */ }
 }
 
 const state = { ...defaults, ...read(KEY, {}) };
 const best = read(BEST, {});
-
 const limits = { offsetMs: [-1000, 1000], videoOffsetMs: [-2000, 2000], volume: [0, 1] };
 
 export const Settings = {
   get: k => state[k],
   set(k, v) {
     if (limits[k]) v = clamp(Math.round(v * 100) / 100, ...limits[k]);
-    if (k === 'name') v = String(v || '').trim().slice(0, 16) || defaults.name;
     state[k] = v;
     write(KEY, state);
     return v;
@@ -42,8 +37,14 @@ export const Settings = {
     write(BEST, best);
     return true;
   },
+  /** melhor pontuação da música entre todos os jogadores */
+  bestForSong(songId) {
+    let top = 0, who = '';
+    for (const [k, v] of Object.entries(best)) if (k.startsWith(songId + ':') && v > top) { top = v; who = k.slice(songId.length + 1); }
+    return { score: top, name: who };
+  },
 };
 
-export const CONTROLS = ['motion', 'camera', 'tap'];
 export const QUALITIES = ['LOW', 'MID', 'HIGH', 'ULTRA'];
-export const controlLabel = c => ({ motion: 'Celular na mão', camera: 'Câmera', tap: 'Toque no ritmo' })[c] || c;
+export const AXES = ['raw', 'flip', 'jdnow'];
+export const axesLabel = a => ({ raw: 'JD Next (padrão)', flip: 'Invertido', jdnow: 'JD Now (girado 30°)' })[a] || a;

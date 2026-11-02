@@ -1,5 +1,5 @@
 import { $, $$ } from './util.js';
-import { Settings, CONTROLS, QUALITIES, controlLabel } from './settings.js';
+import { Settings, QUALITIES, AXES, axesLabel } from './settings.js';
 
 export class SettingsPanel {
   constructor(app) {
@@ -7,19 +7,17 @@ export class SettingsPanel {
     this.root = $('#settings');
     this.root.addEventListener('click', e => { if (e.target === this.root) this.close(); });
     $('#closeSettings').addEventListener('click', () => this.close());
-    $('#setName').addEventListener('change', e => Settings.set('name', e.target.value));
-    $('#setControl').addEventListener('click', () => {
-      Settings.set('control', CONTROLS[(CONTROLS.indexOf(Settings.get('control')) + 1) % CONTROLS.length]);
-      this.refresh();
-    });
     $('#setQuality').addEventListener('click', () => {
       Settings.set('quality', QUALITIES[(QUALITIES.indexOf(Settings.get('quality')) + 1) % QUALITIES.length]);
       this.refresh();
     });
-    $('#setCamPreview').addEventListener('click', () => { Settings.set('cameraPreview', !Settings.get('cameraPreview')); this.refresh(); });
+    $('#setAxes').addEventListener('click', () => {
+      Settings.set('axes', AXES[(AXES.indexOf(Settings.get('axes')) + 1) % AXES.length]);
+      this.refresh();
+    });
     $('#fullscreenBtn').addEventListener('click', () => {
       if (document.fullscreenElement) document.exitFullscreen?.();
-      else document.documentElement.requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => {});
+      else document.documentElement.requestFullscreen?.().catch(() => {});
     });
     for (const st of $$('.stepper', this.root)) {
       const [minus, plus] = st.querySelectorAll('button');
@@ -32,10 +30,8 @@ export class SettingsPanel {
   get visible() { return !this.root.hidden; }
 
   refresh() {
-    $('#setName').value = Settings.get('name');
-    $('#setControl').textContent = controlLabel(Settings.get('control'));
     $('#setQuality').textContent = Settings.get('quality');
-    $('#setCamPreview').textContent = Settings.get('cameraPreview') ? 'Sim' : 'Não';
+    $('#setAxes').textContent = axesLabel(Settings.get('axes'));
     for (const st of $$('.stepper', this.root)) {
       const k = st.dataset.key, v = Settings.get(k);
       st.querySelector('output').textContent = k === 'volume' ? `${Math.round(v * 100)}%` : `${v > 0 ? '+' : ''}${v} ms`;
@@ -45,5 +41,5 @@ export class SettingsPanel {
   }
 
   open() { this.refresh(); this.root.hidden = false; $('#closeSettings').focus(); }
-  close() { Settings.set('name', $('#setName').value); this.root.hidden = true; this.app.onSettingsClosed?.(); }
+  close() { this.root.hidden = true; this.app.onSettingsClosed?.(); }
 }

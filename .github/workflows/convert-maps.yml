@@ -1,7 +1,7 @@
 name: Converter mapas (mapPackage)
 
 # Roda o Tools/jdnext_map_converter.py na nuvem: baixa o mapPackage pelo nohud,
-# gera data/maps/<Codename>/map.json + pictos.png e faz commit no main.
+# gera data/maps/<Codename>/map.json + pictos.png + moves.bin (.msm) e faz commit no main.
 # A Vercel (ligada ao repositório) publica sozinha em ~1 minuto.
 on:
   workflow_dispatch:
@@ -9,10 +9,6 @@ on:
       codenames:
         description: "Codenames separados por espaço (ex.: ChefKids Starships)"
         required: true
-      moves:
-        description: "Exportar também os classificadores .msm"
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -44,7 +40,7 @@ jobs:
             echo "Codenames inválidos: use só letras, números, _ e -"; exit 1
           fi
           set +e
-          python Tools/jdnext_map_converter.py $CODENAMES ${{ inputs.moves && '--moves' || '' }}
+          python Tools/jdnext_map_converter.py $CODENAMES
           echo "code=$?" >> "$GITHUB_OUTPUT"
 
       - name: Salvar no main

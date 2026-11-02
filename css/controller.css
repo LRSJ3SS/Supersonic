@@ -1,0 +1,54 @@
+/* Dance Next Now — controle no celular */
+body.ctl { overflow: auto; --me: var(--pink); }
+.cview { position: relative; z-index: 1; min-height: 100dvh; display: flex; flex-direction: column; align-items: center; gap: 16px;
+  padding: calc(18px + env(safe-area-inset-top, 0px)) 18px calc(18px + var(--safe-b)); max-width: 520px; margin: 0 auto; }
+#join { justify-content: center; }
+.logo.small b { font-size: 64px; }
+.logo.small i { font-size: 38px; }
+.center { text-align: center; margin: 0; }
+.field { width: 100%; display: flex; flex-direction: column; gap: 6px; font-weight: 800; }
+.field input { height: 58px; border-radius: 16px; border: 2px solid var(--line); background: var(--glass); padding: 0 16px; font-size: 22px; font-weight: 800;
+  outline: none; -webkit-user-select: text; user-select: text; }
+#code { letter-spacing: 8px; text-transform: uppercase; text-align: center; font-size: 30px; }
+.field input:focus { border-color: var(--pink); }
+#joinBtn { width: 100%; }
+.msg { min-height: 1.4em; color: var(--yellow); font-weight: 700; text-align: center; margin: 0; }
+
+.me { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 18px; background: rgba(12,5,36,.7);
+  border-left: 8px solid var(--me); }
+.me-badge { width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center; font-weight: 900; font-size: 22px; background: var(--me); color: #0B0420; }
+.me b { display: block; font-size: 20px; }
+.me small { color: var(--dim); font-weight: 700; }
+.me > div { flex: 1; min-width: 0; }
+.link-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--red); box-shadow: 0 0 10px var(--red); }
+.link-dot.ok { background: var(--green); box-shadow: 0 0 10px var(--green); }
+
+.pane { width: 100%; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 18px; justify-content: center; text-align: center; }
+.status { font-size: 20px; font-weight: 800; margin: 0; }
+.status.big { font-size: 34px; font-style: italic; }
+.tip { color: var(--dim); margin: 0; }
+.pad { display: grid; grid-template-columns: repeat(3, 92px); grid-template-rows: repeat(3, 92px); gap: 10px; }
+.pk { border: 0; border-radius: 22px; background: var(--glass); border: 1px solid var(--line); font-size: 30px; font-weight: 900; color: #fff; cursor: pointer; }
+.pk:active { transform: scale(.93); background: color-mix(in srgb, var(--me) 40%, transparent); }
+.pk.up { grid-column: 2; grid-row: 1; } .pk.left { grid-column: 1; grid-row: 2; } .pk.ok { grid-column: 2; grid-row: 2; background: var(--me); color: #0B0420; }
+.pk.right { grid-column: 3; grid-row: 2; } .pk.down { grid-column: 2; grid-row: 3; }
+.sensor { width: 100%; display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; font-weight: 700; color: var(--dim); font-size: 14px; }
+.meter { height: 10px; border-radius: 999px; background: rgba(255,255,255,.12); overflow: hidden; }
+.meter > div { height: 100%; width: 0; background: var(--me); transition: width .1s linear; }
+#sensorMsg.bad { color: var(--red); }
+
+.play { justify-content: space-between; padding: 10px 0; }
+.song { font-weight: 800; margin: 0; color: var(--dim); }
+.coach { margin: 0; font-weight: 900; color: var(--me); }
+.fb { font-size: clamp(56px, 18vw, 96px); font-weight: 900; font-style: italic; min-height: 1.2em; opacity: 0; text-shadow: 0 5px 0 rgba(0,0,0,.45); }
+.fb.pop { animation: pop .9s ease-out forwards; }
+.combo-c { font-weight: 900; font-size: 22px; min-height: 1.3em; }
+.score-c { display: flex; flex-direction: column; align-items: center; }
+.score-c span { font-size: 54px; font-weight: 900; color: var(--yellow); font-variant-numeric: tabular-nums; }
+.score-c.big span { font-size: 72px; }
+.score-c small { color: var(--dim); font-weight: 700; }
+.pause-c { width: 60%; }
+.rank { font-size: 40px; font-weight: 900; font-style: italic; margin: 0; color: var(--me); }
+.record { color: var(--green); font-weight: 900; margin: 0; min-height: 1.2em; }
+.counts { color: var(--dim); font-weight: 700; font-size: 14px; margin: 0; }
+#vResult .btn { width: 100%; }

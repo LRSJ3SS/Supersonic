@@ -1,22 +1,22 @@
-import { $, el, clamp, clamp01, starRow, setStars, songColor, sleep } from './util.js';
+import { $, el, clamp, clamp01, starRow, setStars, songColor } from './util.js';
 import { urls, setMedia, clearMedia, fetchMapAssets, MapLibrary, inSpans } from './data.js';
-import { SongTiming, BeatGrid, Scorer, RATINGS, R, MAX_SCORE, starsFor } from './timing.js';
-import { MotionInput, CameraInput, requestMotionPermission, WakeLock } from './input.js';
+import { SongTiming, BeatGrid, starsFor } from './timing.js';
+import { PlayerScorer, MAX_SCORE } from './player-scorer.js';
+import { WakeLock } from './input.js';
 import { Settings } from './settings.js';
 
 const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+const RATING_TEXT = ['X', 'OK', 'GOOD', 'SUPER', 'PERFECT', 'YEAH!'];
 const RATING_COLORS = ['var(--red)', 'var(--violet)', 'var(--cyan)', 'var(--green)', 'var(--yellow)', 'var(--gold)'];
 const PICTO_POOL = 10;
 
-/** Esperar um evento de mídia (ou erro/tempo esgotado). */
 function waitMedia(media, okEvent, timeoutMs) {
   return new Promise(resolve => {
     if (okEvent === 'canplay' && media.readyState >= 3) return resolve(true);
     if (okEvent === 'loadeddata' && media.readyState >= 2) return resolve(true);
     const done = ok => { clearTimeout(t); media.removeEventListener(okEvent, onOk); media.removeEventListener('error', onErr); resolve(ok); };
     const onOk = () => done(true);
-    // o primeiro erro pode ser só o CDN direto recusando: data.setMedia tenta o proxy
-    // e só marca data-failed quando o proxy também falha
+    // o 1º erro pode ser só o CDN recusando: data.setMedia tenta o proxy e marca data-failed se falhar de novo
     const onErr = () => setTimeout(() => { if (media.dataset.failed === '1' || !media.dataset.src) done(false); }, 0);
     const t = setTimeout(() => done(false), timeoutMs);
     media.addEventListener(okEvent, onOk);
@@ -24,46 +24,40 @@ function waitMedia(media, okEvent, timeoutMs) {
   });
 }
 
+/** Tela da partida. Quem dança são os celulares conectados na sala. */
 export class GameScreen {
   constructor(app) {
     this.app = app;
     this.video = $('#gameVideo');
     this.audio = $('#gameAudio');
-    this.motion = new MotionInput();
-    this.camera = new CameraInput($('#camVideo'));
     this.state = 'idle';
     this.session = 0;
     this.raf = 0;
+    this.dancers = [];
+    this.anchor = { perf: 0, clock: 0 };
 
-    starRow($('#hudStars'));
     $('#pauseBtn').addEventListener('click', () => { if (this.state === 'playing') this.pause(); });
-    $('#tapZone').addEventListener('pointerdown', () => this.tap());
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.state === 'playing') this.pause(); });
-
     const lane = $('#lane');
     this.pictoEls = Array.from({ length: PICTO_POOL }, () => { const d = el('div', { class: 'picto', hidden: true }); lane.append(d); return d; });
     window.addEventListener('resize', () => this.measureLane());
   }
 
+  get active() { return ['loading', 'starting', 'playing', 'paused'].includes(this.state); }
+
   // ------------------------------------------------------------ fluxo
-  /** Chamado direto do clique em "DANÇAR!" (gesto do usuário destrava áudio e sensor no iOS). */
-  start(song, previewOnly, coach = 0) {
+  start(song, previewOnly) {
     this.song = song;
     this.previewOnly = previewOnly;
-    this.coach = coach;
-    this.unlockInGesture();
+    this.unlockAudio();
     this.load();
   }
 
-  restart() { this.unlockInGesture(); this.load(); }
+  restart() { this.unlockAudio(); this.load(); }
 
-  unlockInGesture() {
+  unlockAudio() {
     const a = this.audio;
-    if (!a.src || a.src.startsWith('data:')) {
-      a.src = SILENT_WAV;
-      a.play().then(() => a.pause()).catch(() => {});
-    }
-    if (Settings.get('control') === 'motion') this.motionPermission = requestMotionPermission();
+    if (!a.src || a.src.startsWith('data:')) { a.src = SILENT_WAV; a.play().then(() => a.pause()).catch(() => {}); }
   }
 
   async load() {
@@ -72,11 +66,10 @@ export class GameScreen {
     this.stopAll(false);
     this.state = 'loading';
     document.body.classList.add('playing');
-    this.resetHud();
     const s = this.song;
     this.overlay(s.title, this.previewOnly ? 'Carregando prévia...' : 'Buscando o mapa no servidor...', [['Cancelar', () => this.quit()]], true);
+    this.app.room.setState({ screen: 'loading', title: s.title, artist: s.artist });
 
-    // ---- de onde vem o vídeo/áudio
     let timing = SongTiming.fromSong(s);
     let videoUrl, audioUrl;
     this.map = null;
@@ -97,7 +90,7 @@ export class GameScreen {
         return;
       }
       if (MapLibrary.has(s.map)) {
-        this.overlayMsg('Carregando coreografia (moves e pictos)...');
+        this.overlayMsg('Carregando coreografia, pictos e movimentos (.msm)...');
         this.map = await MapLibrary.load(s.map).catch(() => null);
         if (!alive()) return;
         if (this.map?.timing.valid) timing = this.map.timing;
@@ -106,7 +99,6 @@ export class GameScreen {
     }
     if (!alive()) return;
 
-    // ---- carrega mídia
     this.overlayMsg('Carregando vídeo e música...');
     setMedia(this.audio, audioUrl);
     setMedia(this.video, videoUrl);
@@ -121,68 +113,51 @@ export class GameScreen {
     }
     this.videoOk = videoOk;
 
-    // ---- controle
-    this.mode = Settings.get('control');
-    let notice = null;
-    if (this.mode === 'motion') {
-      const perm = await (this.motionPermission || requestMotionPermission());
-      this.motion.start();
-      if (perm === 'granted') {
-        const t0 = performance.now();
-        while (!this.motion.receiving && performance.now() - t0 < 2500 && alive()) await sleep(100);
-      }
-      if (!this.motion.receiving) {
-        this.motion.stop();
-        this.mode = 'tap';
-        notice = 'Sensor de movimento indisponível: toque na tela ou aperte ESPAÇO no ritmo';
-      }
-    } else if (this.mode === 'camera') {
-      this.overlayMsg('Permita o uso da câmera. Afaste-se até aparecer de corpo inteiro.');
-      try {
-        await this.camera.start(Settings.get('cameraPreview'));
-        const t0 = performance.now();
-        while (!this.camera.receiving && performance.now() - t0 < 5000 && alive()) await sleep(100);
-        if (!this.camera.receiving) throw new Error();
-      } catch {
-        this.camera.stop();
-        this.mode = 'tap';
-        notice = 'Câmera indisponível: toque na tela ou aperte ESPAÇO no ritmo';
-      }
-    }
-    if (!alive()) return;
-
-    // ---- batidas e pontuação
+    // ---- batidas e movimentos
     const offset = Settings.get('offsetMs') / 1000;
     if (this.previewOnly) {
       const entry = s.previewEntry || 0;
       this.grid = new BeatGrid(timing, entry, timing.secondsAtBeat(entry), this.length, offset);
-      this.videoOffset = 0; // a prévia em vídeo é cortada no mesmo ponto do áudio
-      this.scorer = new Scorer(this.grid, this.mode, Scorer.beatWindows(this.grid, 1 + offset, this.length - 1));
+      this.videoOffset = 0;
     } else {
       this.grid = new BeatGrid(timing, timing.startBeat, timing.origin, this.length, offset);
       this.videoOffset = timing.videoOffset;
-      if (this.map?.moves.length) {
-        const coach = clamp(this.coach, 0, this.map.coaches - 1);
-        const moves = this.map.movesFor(coach).map(m => ({ start: m.start + offset, end: m.end + offset, gold: m.gold }));
-        this.scorer = new Scorer(this.grid, this.mode, moves, true);
-      } else {
-        const first = Math.max(1, timing.audioTime(0) + offset);
-        this.scorer = new Scorer(this.grid, this.mode, Scorer.beatWindows(this.grid, first, this.length - 1.5));
-      }
     }
-    this.scorer.onRated = (r, gold) => this.onRated(r, gold);
-    this.setupMapHud();
+    const coaches = this.map?.coaches || 1;
+    const fallbackMoves = () => {
+      const first = this.previewOnly ? 1 : Math.max(1, timing.audioTime(0) + offset);
+      const b = this.grid.beats, out = [];
+      let i = 0;
+      while (i < b.length && b[i] < first) i++;
+      for (; i + 2 < b.length && b[i + 2] <= this.length - 1.5; i += 2) out.push({ start: b[i], end: b[i + 2], gold: false, name: '' });
+      return out;
+    };
 
-    this.hint(notice || ({
-      motion: 'Segure o celular na mão direita e siga o coach!',
-      camera: 'Dance de corpo inteiro na frente da câmera!',
-      tap: 'Toque na tela ou aperte ESPAÇO em cada batida!',
-    })[this.mode], 6);
+    // ---- jogadores: cada celular conectado dança um coach
+    const players = this.app.room.connected;
+    this.dancers = players.map((p, i) => {
+      const coach = i % coaches;
+      const moves = this.map?.moves.length
+        ? this.map.movesFor(coach).map(m => ({ start: m.start + offset, end: m.end + offset, gold: m.gold, name: m.name }))
+        : fallbackMoves();
+      const scorer = new PlayerScorer(moves, this.map?.bank || null, Settings.get('axes'));
+      return { player: p, coach, scorer, shown: 0, lastStars: -1, el: null };
+    });
+    this.realMoves = !!(this.map?.bank && this.dancers.some(d => d.scorer.withClassifier));
+    this.buildPlayerHud();
+    this.setupMapHud();
+    this.resetHud();
+    for (const d of this.dancers)
+      this.app.room.send(d.player, { t: 'state', screen: 'playing', title: s.title, artist: s.artist, coach: d.coach + 1, coaches, msm: this.realMoves });
+    this.app.room.state = { screen: 'playing', title: s.title, artist: s.artist };
+
+    this.hint(this.realMoves ? 'Segure o celular na mão direita, com a tela virada para você, e siga o coach!'
+      : 'Música sem .msm convertido: nota pela energia do movimento', 6);
     if (!this.videoOk) this.hint('Vídeo indisponível neste navegador — siga o ritmo da música', 6);
-    else if (innerHeight > innerWidth && this.mode !== 'motion') this.hint('Dica: deite o celular para ver o coach maior', 5);
 
     WakeLock.on();
     this.clock = 0;
+    this.anchor = { perf: performance.now(), clock: 0 };
     this.hideOverlay();
     this.state = 'starting';
     this.playAudio();
@@ -190,10 +165,9 @@ export class GameScreen {
   }
 
   playAudio() {
-    this.audio.play().catch(err => {
+    this.audio.play().catch(() => {
       if (this.state !== 'starting') return;
-      this.overlay('Pronto?', 'Toque para começar!', [['COMEÇAR', () => { this.hideOverlay(); this.playAudio(); }, 'pink']]);
-      if (err?.name !== 'NotAllowedError') console.warn(err);
+      this.overlay('Pronto?', 'Clique na tela do computador para começar a música.', [['COMEÇAR', () => { this.hideOverlay(); this.playAudio(); }, 'pink']]);
     });
   }
 
@@ -205,20 +179,28 @@ export class GameScreen {
       const dt = Math.min(0.1, (now - last) / 1000);
       last = now;
       if (this.state === 'starting' && !this.audio.paused && this.audio.currentTime > 0) this.state = 'playing';
-      if (this.state === 'playing') this.tick(dt);
+      if (this.state === 'playing') this.tick(dt, now);
     };
     this.raf = requestAnimationFrame(frame);
   }
 
-  tick(dt) {
-    // relógio suave a partir do currentTime do <audio>
+  /** Amostras do celular chegam com o tempo já no relógio desta tela (performance.now). */
+  onSamples(player, samples) {
+    if (this.state !== 'playing') return;
+    const d = this.dancers.find(x => x.player === player);
+    if (!d) return;
+    const a = this.anchor;
+    d.scorer.addSamples(samples.map(s => ({ t: a.clock + (s.h - a.perf) / 1000, x: s.x, y: s.y, z: s.z })));
+  }
+
+  tick(dt, now) {
     const raw = this.audio.currentTime;
     this.clock += dt;
     const diff = raw - this.clock;
     if (Math.abs(diff) > 0.15) this.clock = raw; else this.clock += diff * 0.1;
     const t = this.clock;
+    this.anchor = { perf: now, clock: t };
 
-    // vídeo começa em videoStartTime; áudio no startBeat
     if (this.videoOk) {
       const vt = t + this.videoOffset + Settings.get('videoOffsetMs') / 1000;
       const v = this.video;
@@ -231,19 +213,17 @@ export class GameScreen {
       }
     }
 
-    if (this.mode === 'motion') this.scorer.addEnergy(t, this.motion.read());
-    else if (this.mode === 'camera') this.scorer.addEnergy(t, this.camera.read());
-    this.scorer.update(t, dt);
+    for (const d of this.dancers) {
+      for (const ev of d.scorer.update(t)) {
+        this.showFeedback(d, ev);
+        this.app.room.send(d.player, { t: 'rate', r: ev.r, gold: ev.gold, score: d.scorer.scoreInt, combo: d.scorer.combo });
+      }
+    }
     this.tickMapHud(t);
     this.updateHud(t, dt);
 
-    if (this.audio.ended || t >= this.length || (this.scorer.finished && t >= this.length - 1)) this.finish();
-  }
-
-  tap() {
-    if (this.state !== 'playing' || this.mode !== 'tap') return;
-    this.scorer.addTap(this.clock);
-    this.tapFlash = 1;
+    const done = this.dancers.every(d => d.scorer.finished);
+    if (this.audio.ended || t >= this.length || (done && t >= this.length - 1)) this.finish();
   }
 
   pause() {
@@ -251,24 +231,34 @@ export class GameScreen {
     this.state = 'paused';
     this.audio.pause();
     this.video.pause();
-    this.overlay('Pausado', `${this.song.title} - ${this.song.artist}` + (this.map ? `\nCoreografia completa · coach ${this.coach + 1}` : ''),
+    this.app.room.broadcast({ t: 'state', screen: 'paused', title: this.song.title, artist: this.song.artist });
+    this.overlay('Pausado', `${this.song.title} - ${this.song.artist}`,
       [['Continuar', () => this.resume(), 'pink'], ['Reiniciar', () => this.restart()], ['Sair', () => this.quit()]]);
   }
 
   resume() {
+    if (this.state !== 'paused') return;
     this.hideOverlay();
     this.state = 'starting';
     this.clock = this.audio.currentTime;
+    for (const d of this.dancers) this.app.room.send(d.player, { t: 'state', screen: 'playing', title: this.song.title, artist: this.song.artist, coach: d.coach + 1, msm: this.realMoves });
     this.playAudio();
   }
 
   finish() {
     this.state = 'done';
-    const score = this.scorer.scoreInt;
-    const record = !this.previewOnly && Settings.submitScore(this.song.id, score);
-    const result = { song: this.song, scorer: this.scorer, previewOnly: this.previewOnly, record, realMoves: this.scorer.realMoves, mode: this.mode };
+    const ranking = this.dancers.map(d => {
+      const score = d.scorer.scoreInt;
+      const record = !this.previewOnly && Settings.submitScore(`${this.song.id}:${d.player.name}`, score);
+      return { name: d.player.name, color: d.player.color, slot: d.player.slot, coach: d.coach, score, stars: starsFor(score), record,
+        counts: d.scorer.counts, goldHits: d.scorer.goldHits, goldTotal: d.scorer.goldTotal, bestCombo: d.scorer.bestCombo, player: d.player };
+    }).sort((a, b) => b.score - a.score);
+    ranking.forEach((r, i) => {
+      r.rank = i + 1;
+      this.app.room.send(r.player, { t: 'result', score: r.score, stars: r.stars, rank: r.rank, total: ranking.length, counts: r.counts, gold: [r.goldHits, r.goldTotal], record: r.record });
+    });
     this.stopAll(true);
-    this.app.showResults(result);
+    this.app.showResults({ song: this.song, previewOnly: this.previewOnly, realMoves: this.realMoves, ranking });
   }
 
   quit() {
@@ -282,76 +272,81 @@ export class GameScreen {
     clearMedia(this.audio);
     clearMedia(this.video);
     this.video.playbackRate = 1;
-    this.motion.stop();
-    this.camera.stop();
     WakeLock.off();
     if (leaving) {
-      this.state = this.state === 'done' ? 'done' : 'idle';
+      if (this.state !== 'done') this.state = 'idle';
       document.body.classList.remove('playing');
       this.hideOverlay();
     }
   }
 
-  onKey(e) {
-    if (e.key === 'Escape') {
+  /** Teclado do PC ou controle remoto do celular. */
+  onKey(key) {
+    if (key === 'Escape' || key === 'back') {
       if (this.state === 'playing') this.pause();
       else if (this.state === 'paused') this.resume();
-      else this.quit();
+      else if (this.state === 'error' || this.state === 'loading') this.quit();
       return true;
     }
-    if ([' ', 'j', 'f', 'J', 'F'].includes(e.key)) { this.tap(); return true; }
+    if ((key === 'Enter' || key === 'ok') && this.state === 'paused') { this.resume(); return true; }
+    if ((key === 'Enter' || key === 'ok') && !$('#overlay').hidden) { $('#ovButtons .btn')?.click(); return true; }
     return false;
   }
 
-  // ------------------------------------------------------------ HUD
+  // ------------------------------------------------------------ HUD dos jogadores
+  buildPlayerHud() {
+    const box = $('#hudPlayers');
+    box.replaceChildren();
+    for (const d of this.dancers) {
+      const stars = el('span', { class: 'stars' });
+      starRow(stars);
+      const card = el('div', { class: 'pcard', style: `--pc:${d.player.color}` },
+        el('div', { class: 'pc-top' }, el('span', { class: 'pc-name' }, d.player.name), el('span', { class: 'pc-score' }, '0')),
+        el('div', { class: 'pc-bar' }, el('div')),
+        el('div', { class: 'pc-bottom' }, stars, el('span', { class: 'pc-coach' }, (this.map?.coaches || 1) > 1 ? `Coach ${d.coach + 1}` : '')),
+        el('div', { class: 'pc-level' }, el('div')),
+        el('div', { class: 'pc-feedback' }));
+      d.el = card;
+      d.ui = {
+        score: card.querySelector('.pc-score'), bar: card.querySelector('.pc-bar > div'), stars,
+        level: card.querySelector('.pc-level > div'), fb: card.querySelector('.pc-feedback'),
+      };
+      box.append(card);
+    }
+  }
+
+  showFeedback(d, ev) {
+    const f = d.ui.fb;
+    f.textContent = RATING_TEXT[ev.r];
+    f.style.color = RATING_COLORS[ev.r];
+    f.classList.remove('pop'); void f.offsetWidth; f.classList.add('pop');
+  }
+
   resetHud() {
-    this.shownScore = 0; this.tapFlash = 0; this.lastStars = -1; this.lyricKey = '';
-    $('#hudName').textContent = Settings.get('name');
-    $('#hudScore').textContent = '0';
-    $('#hudBar').style.width = '0%';
-    setStars($('#hudStars'), 0, false);
-    $('#hudStarLabel').textContent = '';
-    $('#feedback').className = 'feedback';
-    $('#combo').textContent = '';
+    this.lyricKey = '';
     $('#hint').textContent = '';
     $('#progress').style.width = '0%';
-    $('#energy').style.height = '0%';
     $('#hudSong').textContent = `${this.song.title}  ·  ${this.song.artist}${this.previewOnly ? '  (prévia)' : ''}`;
-    $('#lane').hidden = true;
-    $('#lyrics').hidden = true;
     $('#goldLabel').hidden = true;
     $('#goldVignette').classList.remove('on');
   }
 
   updateHud(t, dt) {
-    const sc = this.scorer.scoreInt;
-    this.shownScore += (sc - this.shownScore) * Math.min(1, dt * 6);
-    if (Math.abs(sc - this.shownScore) < 1) this.shownScore = sc;
-    $('#hudScore').textContent = Math.round(this.shownScore);
-    $('#hudBar').style.width = `${clamp01(this.shownScore / MAX_SCORE) * 100}%`;
-    const st = starsFor(sc);
-    if (st !== this.lastStars) {
-      this.lastStars = st;
-      setStars($('#hudStars'), Math.min(5, st), st >= 6);
-      $('#hudStarLabel').textContent = st >= 7 ? 'MEGASTAR' : st === 6 ? 'SUPERSTAR' : '';
+    for (const d of this.dancers) {
+      const sc = d.scorer.scoreInt;
+      d.shown += (sc - d.shown) * Math.min(1, dt * 6);
+      if (Math.abs(sc - d.shown) < 1) d.shown = sc;
+      d.ui.score.textContent = Math.round(d.shown);
+      d.ui.bar.style.width = `${clamp01(d.shown / MAX_SCORE) * 100}%`;
+      const st = starsFor(sc);
+      if (st !== d.lastStars) { d.lastStars = st; setStars(d.ui.stars, Math.min(5, st), st >= 6); }
+      d.ui.level.style.width = `${clamp01(d.scorer.lastLevel) * 100}%`;
+      d.el.classList.toggle('offline', !d.player.connected);
     }
     $('#progress').style.width = `${clamp01(t / this.length) * 100}%`;
     const ph = this.grid.phase(t);
     $('#pulse').style.transform = `scale(${0.75 + (1 - ph) ** 2 * 0.35})`;
-    this.tapFlash = Math.max(0, (this.tapFlash || 0) - dt * 4);
-    const level = this.mode === 'tap' ? this.tapFlash : this.scorer.level;
-    $('#energy').style.height = `${clamp01(level) * 100}%`;
-    const h = $('#hint');
-    if (this.hintUntil && performance.now() > this.hintUntil) { h.textContent = ''; this.hintUntil = 0; }
-  }
-
-  onRated(r, gold) {
-    const f = $('#feedback');
-    f.textContent = RATINGS[r];
-    f.style.color = RATING_COLORS[r];
-    f.classList.remove('pop'); void f.offsetWidth; f.classList.add('pop');
-    $('#combo').textContent = this.scorer.combo >= 3 ? `COMBO x${this.scorer.combo}` : '';
-    if (gold && r === R.YEAH && navigator.vibrate) navigator.vibrate(60);
+    if (this.hintUntil && performance.now() > this.hintUntil) { $('#hint').textContent = ''; this.hintUntil = 0; }
   }
 
   hint(text, seconds) {
@@ -393,7 +388,7 @@ export class GameScreen {
       let used = 0, onTarget = false;
       const H = this.pictoH, atlas = m.atlas;
       for (const p of m.pictos) {
-        if (p.start - this.lead > t) break; // ordenados por início
+        if (p.start - this.lead > t) break;
         if (t >= p.start && t <= p.end) onTarget = true;
         if (t > p.end + 0.35 || used >= PICTO_POOL) continue;
         const d = this.pictoEls[used++];
@@ -426,7 +421,7 @@ export class GameScreen {
       else {
         const sung = cur.words.filter(w => t >= w.start).length;
         key = `${this.lineCursor}:${sung}`;
-        html = cur.words.map((w, i) => i < sung ? `<span class="sung">${esc(w.text)}</span>` : esc(w.text)).join('');
+        html = cur.words.map((w, i) => (i < sung ? `<span class="sung">${esc(w.text)}</span>` : esc(w.text))).join('');
         next = lines[this.lineCursor + 1] ? plain(lines[this.lineCursor + 1]) : '';
       }
       if (key !== this.lyricKey) {

@@ -1,95 +1,81 @@
-# Dance Next Now — versão HTML
+# Dance Next Now
 
-Clone de Just Dance para navegador em **HTML + CSS + JavaScript puro** (sem build, sem Unity),
-publicado na **Vercel**, com um conversor em **Python/UnityPy** que extrai a coreografia completa
-dos `mapPackage` do Just Dance Next.
+Clone de Just Dance **no estilo Just Dance Now**: a **tela** roda no computador/TV e cada
+**celular vira um controle** que você segura na mão. Os movimentos são avaliados pelos
+classificadores **.msm originais** das coreografias do Just Dance Next.
 
-- **679 músicas** do `songdb.json`, com busca, categorias e prévia em vídeo + áudio
-- **Coreografia completa** buscada no `nohud.jdleaderboards.com` (mesmo fluxo do `jdnextAutomodder_reference.py`)
-- **Músicas convertidas:** moves reais, gold moves ("YEAH!"), pictogramas deslizando até o alvo, letra karaokê e escolha de coach
-- **3 controles:** celular na mão (acelerômetro/giroscópio), câmera (movimento entre quadros) ou toque no ritmo (tela/ESPAÇO)
-- Pontuação estilo JD (13 333, 5 estrelas, SUPERSTAR, MEGASTAR), combo e recordes salvos no navegador
-- Funciona em PC, celular deitado e celular em pé
+- **Sala com código + QR code:** até 6 celulares por sala, cada um com cor e coach próprios
+- **Controle remoto no celular:** setas e OK para escolher a música, pausar, jogar de novo
+- **Nota pelos .msm:** o acelerômetro do celular é comparado ao classificador de cada move
+  (perfil JD Next: PERFECT / SUPER / GOOD / OK / X, gold move vale 5x e dá YEAH!)
+- **679 músicas** do songdb com prévia em vídeo; vídeo sem HUD do nohud, pictos, letra karaokê e gold moves
+- Ranking no fim, na tela e em cada celular
+
+## Como jogar
+
+1. Abra o site no computador. Aparece o **código da sala** e um QR code.
+2. No celular, leia o QR (ou abra `/controller.html`), digite seu nome e toque em **ENTRAR**.
+   No iPhone, permita o acesso ao sensor de movimento quando pedir.
+3. Escolha a música no PC (mouse/teclado) ou pelo controle do celular, e dance segurando o
+   celular na **mão direita, com a tela virada para você**.
+
+Músicas com a etiqueta **COMPLETA** têm moves, pictos e .msm convertidos. As outras também
+tocam, mas a nota vem só da energia do movimento.
+
+## Como funciona a conexão
+
+Tela e celulares conversam por **WebRTC** (PeerJS). O servidor público do PeerJS só apresenta
+os aparelhos; depois os dados vão direto entre eles (ou pelos servidores TURN públicos do PeerJS,
+se as redes forem diferentes). Na mesma rede Wi-Fi a latência é menor.
+
+Cada celular sincroniza o relógio com a tela (ping a cada 2 s, menor RTT vence) e manda o
+acelerômetro em lotes de 50 ms com o tempo já convertido. A tela avalia cada move ~0,4 s depois
+que ele termina, usando a janela deslizante do JD Now (7 subjanelas de −75 ms a +75 ms) e
+um ponteiro que aprende o atraso de cada jogador.
+
+Teste com servidor PeerJS próprio: `?peer=host:porta` na URL da tela (o QR leva junto).
+
+## Ajustes da tela
+
+Qualidade do vídeo, sincronia das batidas, atraso do vídeo, volume e **eixos do celular**:
+`JD Next (padrão)` usa a convenção dos apps Unity/CoreMotion (em g, deitado com a tela para cima = z −1);
+`Invertido` troca os sinais; `JD Now` aplica a rotação de 30° do app JD Now. Se a nota parecer
+baixa mesmo dançando certo, teste outro perfil de eixos.
+
+## Converter coreografias (UnityPy)
+
+No GitHub: **Actions > "Converter mapas (mapPackage)" > Run workflow** e digite os codenames
+(o `mapName` do songdb, ex.: `Kitipo OneLastTime`). O workflow gera e faz commit em `data/maps/<Codename>/`:
+
+| Arquivo | Conteúdo |
+|---|---|
+| `map.json` | timing, moves (início, duração, coach, gold, tipo), pictos, letra, gold, hideHud |
+| `pictos.png` | atlas com os pictogramas |
+| `moves.bin` | todos os classificadores .msm do celular (`HandDeviceMoveModels`) num arquivo só |
+
+Local: `pip install UnityPy Pillow` e `python3 Tools/jdnext_map_converter.py Kitipo`.
+Mapas antigos com pasta `moves/`: `python3 Tools/jdnext_map_converter.py --repack data/maps/Kitipo`.
 
 ## Estrutura
 
 ```
-index.html              todas as telas
-css/style.css           visual (neon JD Next, responsivo)
-js/main.js              troca de telas e teclado
-js/select.js            grade de músicas + prévia
-js/game.js              partida: vídeo/áudio sincronizados, HUD, pictos, letra, gold
-js/results.js           resultado
-js/settings*.js         ajustes (localStorage)
-js/timing.js            relógio musical (markers), batidas e pontuação
-js/input.js             sensor de movimento, câmera, wake lock
-js/data.js              songdb, nohud, mapas convertidos, fallback de mídia
-data/songdb.min.json    lista compacta de músicas
-data/maps/              mapas convertidos (index.json + <Codename>/map.json + pictos.png)
-api/proxy.js            Edge Function de reserva para mídia
-vercel.json             rewrites /cdn e /nohud
-Tools/jdnext_map_converter.py   mapPackage -> data/maps (UnityPy)
-Tools/build_songdb.py           songdb.json -> data/songdb.min.json
-.github/workflows/convert-maps.yml   conversão de mapas pelo GitHub (dá pra fazer pelo celular)
+index.html / js/main.js       tela: título com sala, escolha, partida, resultado
+controller.html / js/controller.js   controle no celular
+js/room.js, js/net.js         sala (PeerJS), protocolo, QR
+js/msm.js                     leitor e avaliador .msm (MoveSpace)
+js/player-scorer.js           nota de cada jogador (janelas, pontos, combo)
+js/game.js                    vídeo/áudio sincronizados, HUD dos jogadores, pictos, letra
+js/data.js, js/timing.js      songdb, nohud, mapas convertidos, relógio musical
+js/vendor/                    PeerJS 1.5.5 e qrcode-generator 1.4.4 (MIT)
+Tools/                        conversor de mapPackage e do songdb
 ```
 
-## Publicar na Vercel (dá pra fazer tudo pelo celular)
+## Licença e créditos
 
-1. Crie um repositório no GitHub e suba os arquivos desta pasta.
-2. Na Vercel: **Add New > Project**, importe o repositório.
-   Framework Preset: **Other**. Build Command e Output Directory: vazios. **Deploy.**
-3. Pronto. Cada commit no `main` vira um novo deploy automático.
+O avaliador de .msm (`js/msm.js`, `js/player-scorer.js`) é um port do
+[JustDanceEditor](https://github.com/MrKev312/JustDanceEditor) (MrKev312), licenciado sob **GPL-3.0**;
+por isso este projeto também é distribuído sob a GPL-3.0 (arquivo `LICENSE`).
+Formato do mapPackage conferido também em [Unity2UbiArt](https://github.com/Itaybl14/Unity2UbiArt).
 
-Testar no PC: `npx vercel dev` (os rewrites `/cdn` e `/nohud` só existem no servidor da Vercel;
-um `python -m http.server` comum abre a interface, mas não busca as coreografias).
-
-## Converter coreografias (UnityPy)
-
-**Pelo celular:** no GitHub, aba **Actions > "Converter mapas (mapPackage)" > Run workflow**,
-digite os codenames (o `mapName` do songdb, ex.: `ChefKids Starships`). O workflow converte, faz commit em
-`data/maps/` e a Vercel publica sozinha.
-
-**No PC/Termux:**
-
-```
-pip install UnityPy Pillow
-python3 Tools/jdnext_map_converter.py ChefKids Starships
-python3 Tools/jdnext_map_converter.py --package caminho/mapPackage.bundle
-python3 Tools/jdnext_map_converter.py ChefKids --dump        # árvore crua em Tools/.cache/dump/
-```
-
-O que sai do bundle:
-
-| No mapPackage | No map.json |
-|---|---|
-| `MusicTrack` (markers, startBeat, endBeat, videoStartTime) | `timing` |
-| `DanceData.MotionClips` | `moves` (início, duração, coach, gold) |
-| `DanceData.PictoClips` + sprites do `PictogramAtlas` | `pictos` + `pictos.png` |
-| `KaraokeData.Clips` | `lyrics` |
-| `GoldEffectClips` / `HideHudClips` | `gold` / `hideHud` |
-| `HandDeviceMoveModels` (.msm) | `moves/*.msm` com `--moves` |
-
-Tempos em ticks (24 por batida), convertidos com os markers como na UbiArt/JustDanceEditor:
-`tempoÁudio(b) = S(b) − S(startBeat)` e `tempoVídeo = tempoÁudio + S(startBeat) − videoStartTime`.
-
-## Como a mídia é carregada
-
-Vídeo e áudio tocam **direto do CDN da Ubisoft** (não gasta a banda da Vercel). Se o CDN recusar,
-o jogo tenta de novo por `/cdn/...` (rewrite da Vercel). O JSON do nohud sempre passa por `/nohud/...`, por causa do CORS.
-
-## Atalhos
-
-Setas para navegar, Enter para dançar, `/` para buscar, Esc para pausar/voltar, ESPAÇO (ou J/F) no modo toque.
-
-## Limitações
-
-- A nota é **por movimento**, pela intensidade e pelo ritmo do seu movimento; não compara o gesto exato
-  (para isso seria preciso rodar os classificadores `.msm`).
-- Capas são bundles de Switch: os cartões usam a cor da música e a prévia em vídeo.
-- Depende do CDN da Ubisoft e do nohud. Se o nohud falhar, dá para jogar a prévia de 30 s.
-- iPhone: o sensor é liberado no toque em "DANÇAR!"; vídeo `.webm` exige iOS 17.4+.
-
-Formato do mapPackage conferido em [JustDanceEditor](https://github.com/MrKev312/JustDanceEditor) (MrKev312)
-e [Unity2UbiArt](https://github.com/Itaybl14/Unity2UbiArt) (Itaybl14).
-
-Projeto de fã, sem fins lucrativos. Just Dance é marca da Ubisoft. Nenhum vídeo ou música fica hospedado no projeto.
+Projeto de fã, sem fins lucrativos. Just Dance é marca da Ubisoft. Nenhum vídeo ou música fica
+hospedado no projeto; tudo é carregado dos servidores originais.

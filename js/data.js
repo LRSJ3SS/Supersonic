@@ -1,4 +1,5 @@
 import { SongTiming } from './timing.js';
+import { readMoveBank } from './msm.js';
 
 // ---------------------------------------------------------------- URLs
 // Vídeo/áudio tocam direto do CDN da Ubisoft (sem gastar banda da Vercel).
@@ -121,7 +122,7 @@ export function parseMap(json) {
   const T = new SongTiming((tm.markers || []).map(v => v / 48000), tm.startBeat || 0, tm.endBeat || 0, tm.videoStartTime || 0);
   const span = o => ({ start: T.audioTime(o.b), end: T.audioTime(o.b + (o.d || 1)) });
 
-  const moves = (json.moves || []).map(o => ({ ...span(o), coach: o.c || 0, gold: !!o.g, name: o.n }));
+  const moves = (json.moves || []).map(o => ({ ...span(o), coach: o.c || 0, gold: !!o.g, name: o.n, type: o.t || 0 }));
   const atlas = json.atlas || null;
   const pictos = [];
   for (const o of json.pictos || []) {
@@ -146,10 +147,14 @@ export function parseMap(json) {
     lines: lines.map(words => ({ words, start: words[0].start, end: words[words.length - 1].end })),
     gold: (json.gold || []).map(span),
     hideHud: (json.hideHud || []).map(span),
+    /** Moves de mão (MoveType 0 = .msm do celular) do coach; os de câmera (1) ficam de fora. */
     movesFor(coach) {
-      const list = moves.filter(m => m.coach === coach);
-      return list.length ? list : moves.filter(m => m.coach === (moves[0]?.coach ?? 0));
+      const hand = moves.some(m => m.type === 0) ? moves.filter(m => m.type === 0) : moves;
+      const list = hand.filter(m => m.coach === coach);
+      return list.length ? list : hand.filter(m => m.coach === (hand[0]?.coach ?? 0));
     },
+    msm: json.msm || null,
+    bank: null,
   };
 }
 
@@ -173,6 +178,12 @@ export const MapLibrary = {
     const res = await fetch(base + 'map.json');
     if (!res.ok) return null;
     const map = parseMap(await res.json());
+    if (map.msm?.index && Object.keys(map.msm.index).length) {
+      try {
+        const bin = await fetch(base + (map.msm.file || 'moves.bin'));
+        if (bin.ok) map.bank = readMoveBank(await bin.arrayBuffer(), map.msm.index);
+      } catch (e) { console.warn('moves.bin', e); }
+    }
     if (map.atlas && map.pictos.length) {
       map.atlasUrl = base + (map.atlas.file || 'pictos.png');
       await new Promise(done => { const img = new Image(); img.onload = img.onerror = done; img.src = map.atlasUrl; });

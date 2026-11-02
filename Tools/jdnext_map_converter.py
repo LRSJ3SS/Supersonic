@@ -228,6 +228,7 @@ def read_bundle(path):
     env = UnityPy.load(path)
     map_tree = music_tree = None
     sprites, textassets, monos = {}, {}, []
+    by_path = {}
     for obj in env.objects:
         kind = obj.type.name
         try:
@@ -247,9 +248,80 @@ def read_bundle(path):
                 if isinstance(raw, str):
                     raw = raw.encode("utf-8", "surrogateescape")
                 textassets[data.m_Name] = raw
+                by_path[obj.path_id] = (data.m_Name, raw)
         except Exception as e:  # um objeto ruim não derruba a conversão
             log(f"   aviso: {kind} ignorado ({e})")
+    if map_tree is not None:
+        map_tree["_hand_moves"] = hand_move_models(map_tree, by_path)
     return map_tree, music_tree, sprites, textassets, monos
+
+
+def hand_move_models(map_tree, by_path):
+    """HandDeviceMoveModels: nome do move -> bytes do .msm (classificador do celular)."""
+    out = {}
+    for item in as_list((map_tree.get("HandDeviceMoveModels") or {}).get("list")):
+        key = item.get("Key") if isinstance(item, dict) else None
+        val = item.get("Value") if isinstance(item, dict) else None
+        if not key or not isinstance(val, dict):
+            continue
+        hit = by_path.get(val.get("m_PathID"))
+        if hit:
+            out[key.lower()] = hit[1]
+    return out
+
+
+def is_msm(raw):
+    return len(raw) >= 8 and (raw[:4] == b"\x01\x00\x00\x00" or raw[:4] == b"\x00\x00\x00\x01")
+
+
+def pack_moves(moves_by_name, out_dir):
+    """Junta os .msm num único moves.bin. Retorna o índice {nome: [offset, tamanho]}."""
+    index, blob = {}, bytearray()
+    for name in sorted(moves_by_name):
+        raw = moves_by_name[name]
+        if not is_msm(raw):
+            continue
+        while len(blob) % 4:
+            blob.append(0)
+        index[name.lower()] = [len(blob), len(raw)]
+        blob += raw
+    if index:
+        with open(os.path.join(out_dir, "moves.bin"), "wb") as f:
+            f.write(blob)
+    return index
+
+
+def collect_msm(textassets, hand_moves, move_names):
+    """Prefere o mapeamento do HandDeviceMoveModels; senão casa pelo nome do arquivo."""
+    found = dict(hand_moves or {})
+    wanted = {n.lower() for n in move_names}
+    for name, raw in textassets.items():
+        stem = os.path.splitext(name)[0].lower()
+        if stem in wanted and stem not in found and is_msm(raw):
+            found[stem] = raw
+    return found
+
+
+def repack(map_dir):
+    """Gera moves.bin a partir de uma pasta moves/ já exportada (mapas antigos)."""
+    mpath = os.path.join(map_dir, "map.json")
+    with open(mpath, encoding="utf-8") as f:
+        m = json.load(f)
+    mdir = os.path.join(map_dir, "moves")
+    files = {}
+    for fn in os.listdir(mdir):
+        if fn.lower().endswith(".msm"):
+            with open(os.path.join(mdir, fn), "rb") as f:
+                files[fn] = f.read()
+    names = {x["n"] for x in m.get("moves", []) if x.get("t", 0) == 0}
+    msm = collect_msm(files, {}, names)
+    index = pack_moves(msm, map_dir)
+    m["msm"] = {"file": "moves.bin", "index": index}
+    with open(mpath, "w", encoding="utf-8") as f:
+        json.dump(m, f, ensure_ascii=False, separators=(",", ":"))
+    log(f"   {os.path.basename(map_dir)}: {len(index)} classificadores em moves.bin "
+        f"({sum(v[1] for v in index.values()) // 1024} KB), {len(names - set(index))} moves sem .msm")
+    return index
 
 
 def download(url, dest):
@@ -289,6 +361,7 @@ def load_songdb(path):
 # ---------------------------------------------------------------- conversão
 def convert(codename, package, args, songdb):
     map_tree, music_tree, sprites, textassets, monos = read_bundle(package)
+    hand_moves = map_tree.pop("_hand_moves", {}) if map_tree else {}
     if args.dump:
         dump_dir = os.path.join(args.cache, "dump", codename or "bundle")
         os.makedirs(dump_dir, exist_ok=True)
@@ -320,7 +393,13 @@ def convert(codename, package, args, songdb):
     if missing:
         log(f"   aviso: {len(missing)} pictos sem imagem (ex.: {missing[:3]})")
 
-    if args.moves:
+    hand_names = {x["n"] for x in m["moves"] if x.get("t", 0) == 0}
+    msm = collect_msm(textassets, hand_moves, hand_names)
+    index = pack_moves(msm, out_dir)
+    m["msm"] = {"file": "moves.bin", "index": index}
+    log(f"   {len(index)} classificadores .msm em moves.bin ({len(hand_names - set(index))} moves sem .msm)")
+
+    if args.raw_moves:
         mdir = os.path.join(out_dir, "moves")
         os.makedirs(mdir, exist_ok=True)
         for name, raw in textassets.items():
@@ -353,10 +432,16 @@ def main(argv=None):
     ap.add_argument("--songdb", default=DEFAULT_SONGDB)
     ap.add_argument("--cache", default=os.path.join(HERE, ".cache"))
     ap.add_argument("--picto-size", type=int, default=256, help="altura dos pictos no atlas (px)")
-    ap.add_argument("--moves", action="store_true", help="também exporta os .msm originais")
+    ap.add_argument("--raw-moves", action="store_true", help="também salva cada TextAsset (.msm/.gesture) solto em moves/")
+    ap.add_argument("--moves", action="store_true", help=argparse.SUPPRESS)  # compatibilidade: moves.bin agora é sempre gerado
+    ap.add_argument("--repack", nargs="+", metavar="PASTA", help="gera moves.bin a partir de pastas de mapa com moves/")
     ap.add_argument("--dump", action="store_true", help="salva as MonoBehaviours cruas em JSON")
     args = ap.parse_args(argv)
 
+    if args.repack:
+        for d in args.repack:
+            repack(d)
+        return 0
     if not args.codenames and not args.package:
         ap.error("informe um ou mais codenames ou --package")
     os.makedirs(args.out, exist_ok=True)
